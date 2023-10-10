@@ -3,11 +3,12 @@ package com.spl2;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Random;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
-import org.jsoup.nodes.Node;
+import org.jsoup.nodes.*;
 import org.jsoup.select.Elements;
 
 public class HtmlProcessor {
@@ -19,14 +20,27 @@ public class HtmlProcessor {
     private final String IMG_FOLDER = "img";
     private final Document document;
     private final String[] selectorsToRemove = new String[]
-            {"meta:not([name=viewport])", "script", "iframe", "[style*=display: none]",
-            "noscript", "[type=hidden]", "picture source"};
+            {"meta:not([name=viewport])", "script", "iframe", "[style*=display: none]", "video",
+            "noscript", "[type=hidden]", "picture source", "link[rel=preconnect]", "link[rel=preload]"};
 
     private final String[] classesToRemove = new String[]
             {"lazyloaded"};
 
     private final String[] attrToRemove = new String[]
-            {"data-src"};
+            {"data-src", "srcset", "target"};
+
+    private static final String[] FONT_STYLES = {
+            "font-family: Arial, sans-serif",
+            "font-family: Times New Roman, serif;",
+            "font-family: Helvetica, sans-serif;",
+            "font-family: Georgia, serif;",
+            "font-family: Verdana, sans-serif;",
+            "font-family: Courier New, monospace;",
+            "font-family: Palatino Linotype, Book Antiqua, Palatino, serif;",
+            "font-family: Tahoma, Geneva, sans-serif;",
+            "font-family: Impact, Charcoal, sans-serif;",
+            "font-family: Lucida Sans Unicode, Lucida Grande, sans-serif;",
+    };
 
     public HtmlProcessor(String projectURL, String baseUri) {
         this.projectURL = projectURL;
@@ -45,6 +59,12 @@ public class HtmlProcessor {
 
         try {
             removeComments(document);
+            removeFontFaceFromStyles();
+
+            String fontStyles = generateFontStyles();
+            document.head().append(fontStyles);
+
+            manageMenu();
 
             for (String selector: selectorsToRemove) {
                 removeElements(selector);
@@ -68,6 +88,7 @@ public class HtmlProcessor {
 
             prepareToDownload("link[rel=stylesheet]", "href", CSS_FOLDER);
             prepareToDownload("img", "src", IMG_FOLDER);
+            prepareToDownloadBackgroundImagesInStyle("*",  IMG_FOLDER);
 
             Elements hrefLinks = document.select("[href]");
             for (Element linkElement : hrefLinks) {
@@ -76,6 +97,20 @@ public class HtmlProcessor {
                     linkElement.attr("href", "#");
                 }
             }
+
+            // ?
+
+            Elements allElements = document.getAllElements();
+            for (Element element : allElements) {
+                Attributes attributes = element.attributes();
+                for (Attribute attribute : attributes) {
+                    if (attribute.getValue().matches(".*https?://.*")) {
+                        element.removeAttr(attribute.getKey());
+                    }
+                }
+            }
+
+            // ?
 
             Elements linkElements = document.select("link[rel=stylesheet]");
 
@@ -108,7 +143,13 @@ public class HtmlProcessor {
                 if (href.startsWith("//")) {
                     href = "https:" + href;
                 }
-                String fileName =  new File(href).getName().replaceAll("[/?*:|\"<>]", "_");
+                if (isGoogleFontsLink(href)) {
+                    continue;
+                }
+
+                String fileNameWithParams = new File(href).getName();
+                String fileName = fileNameWithParams.split("\\?")[0];
+
                 String cssFilePath = projectURL + dirPath + "/"
                         + fileName;
                 try {
@@ -118,8 +159,57 @@ public class HtmlProcessor {
                 }
                 linkElement.attr(attr, dirPath + "/"
                         + fileName);
+                linkElement.removeAttr("id");
             }
         }
+    }
+
+    private void prepareToDownloadBackgroundImagesInStyle(String elementSelector, String dirPath) {
+        Elements elementsWithStyle = document.select(elementSelector);
+
+        for (Element element : elementsWithStyle) {
+            String style = element.attr("style");
+            if (style != null && style.matches(".*background\\s*:\\s*url.*")) {
+                String imageUrl = extractImageUrlFromStyle(style);
+
+                if (imageUrl != null && !imageUrl.isEmpty()) {
+                    String fileName = getFileNameFromUrl(imageUrl);
+                    String imagePath = projectURL + dirPath + "/" + fileName;
+
+                    try {
+                        downloadFile(imageUrl, imagePath);
+
+                        element.attr("style", "background:url(" + dirPath + "/" + fileName + ")");
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+            }
+        }
+    }
+
+    private String extractImageUrlFromStyle(String style) {
+        String imageUrl = null;
+
+        style = style.replaceAll("&quot;", "\\'");
+        String regex = "background: *url\\(['\"]?([^'\"\\)]+)";
+        Pattern pattern = Pattern.compile(regex);
+        Matcher matcher = pattern.matcher(style);
+
+        while (matcher.find()) {
+            imageUrl = matcher.group(1);
+        }
+
+        return imageUrl;
+    }
+
+    private String getFileNameFromUrl(String imageUrl) {
+        String[] parts = imageUrl.split("/");
+        return parts[parts.length - 1].split("\\?")[0];
+    }
+
+    private boolean isGoogleFontsLink(String href) {
+        return href.contains("fonts.googleapis.com");
     }
 
     private void createTitleDesc() {
@@ -183,6 +273,18 @@ public class HtmlProcessor {
         }
     }
 
+    private void removeFontFaceFromStyles() {
+        Elements styleElements = document.select("style");
+
+        for (Element styleElement : styleElements) {
+            String style = styleElement.html();
+
+            style = style.replaceAll("@font-face[^}]*\\}", "");
+
+            styleElement.html(style);
+        }
+    }
+
     private void downloadFile(String fileUrl, String saveToPath) throws IOException {
         URL url = new URL(fileUrl);
         HttpURLConnection httpConn = (HttpURLConnection) url.openConnection();
@@ -204,5 +306,47 @@ public class HtmlProcessor {
             System.err.println("Не удалось скачать файл: " + fileUrl);
         }
         httpConn.disconnect();
+    }
+
+    private String generateFontStyles() {
+        StringBuilder css = new StringBuilder("<style>\n");
+        css.append("h1, h2, h3, h4, h5, h6, p, a, span, div, strong, em, i, b, u, s, " +
+                "strike, sub, sup, blockquote, code, pre, li, ol, ul, label, button, input, " +
+                "textarea, select, option, th, td, caption, small, caption, article, aside, figure, " +
+                "footer, header, nav, section, main{\n");
+
+        Random random = new Random();
+        int randomIndex = random.nextInt(FONT_STYLES.length);
+        String randomFont = FONT_STYLES[randomIndex];
+
+        css.append(randomFont).append("!important;");
+        css.append("}\n");
+        css.append("</style>");
+
+        return css.toString();
+    }
+
+    private void manageMenu() {
+
+        StringBuilder js = new StringBuilder("<script>\n");
+        js.append("let menu_button = document.querySelector(\".menu_button\")\n");
+        js.append("let menu = document.querySelector(\".menu_switch\")\n");
+        js.append("menu_button.onclick = function () { \n");
+        js.append("menu.classList.contains(\"active\") ? \n");
+        js.append("menu.classList.remove(\"active\") : \n");
+        js.append("menu.classList.add(\"active\"); \n");
+        js.append("} \n");
+        js.append("</script>");
+
+        document.head().append(js.toString());
+
+        StringBuilder css = new StringBuilder("<style>\n");
+        css.append("@media(max-width: 600px) {\n");
+        css.append(".menu_switch.active {\n");
+        css.append("}\n");
+        css.append("}\n");
+        css.append("</style>");
+
+        document.head().append(css.toString());
     }
 }

@@ -9,7 +9,7 @@ public class App
     public static void main( String[] args )
     {
         boolean test = true;
-        String baseUri = "https://www.shopdisney.com/";
+        String baseUri = "https://blog.amphy.com/";
 
         String projectURL = test ? "src/main/resources/" : "";
 
