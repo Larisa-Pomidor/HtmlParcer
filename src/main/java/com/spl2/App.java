@@ -9,11 +9,12 @@ public class App
     public static void main( String[] args )
     {
         boolean test = true;
-        String baseUri = "https://blog.amphy.com/";
+        boolean includeJs = true;
+        String baseUri = "https://www.topessaywriting.org/";
 
         String projectURL = test ? "src/main/resources/" : "";
 
-        HtmlProcessor htmlProcessor = new HtmlProcessor(projectURL, baseUri);
+        HtmlProcessor htmlProcessor = new HtmlProcessor(projectURL, baseUri, includeJs);
         htmlProcessor.parseHTML();
 
     }

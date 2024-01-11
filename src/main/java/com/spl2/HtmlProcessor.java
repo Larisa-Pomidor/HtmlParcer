@@ -18,6 +18,7 @@ public class HtmlProcessor {
     private final String CSS_FOLDER = "css";
     private final String OUTPUT_INDEX = "index.html";
     private final String IMG_FOLDER = "img";
+    private final String JS_FOLDER = "js";
     private final Document document;
     private final String[] selectorsToRemove = new String[]
             {"meta:not([name=viewport])", "script", "iframe", "[style*=display: none]", "video",
@@ -42,9 +43,12 @@ public class HtmlProcessor {
             "font-family: Lucida Sans Unicode, Lucida Grande, sans-serif;",
     };
 
-    public HtmlProcessor(String projectURL, String baseUri) {
+    private Boolean includeJs;
+
+    public HtmlProcessor(String projectURL, String baseUri, Boolean includeJs) {
         this.projectURL = projectURL;
         this.baseUri = baseUri;
+        this.includeJs = includeJs;
         try {
             document = Jsoup.parse(new File(projectURL + INPUT_HTML_PATH), "UTF-8");
         } catch (IOException e) {
@@ -57,7 +61,16 @@ public class HtmlProcessor {
         createDir(projectURL + CSS_FOLDER);
         createDir(projectURL + IMG_FOLDER);
 
+        if (includeJs) {
+            createDir(projectURL + JS_FOLDER);
+        }
+
         try {
+            Element htmlElement = document.select("html").first();
+            if (htmlElement != null) {
+                htmlElement.attr("lang", "en");
+            }
+
             removeComments(document);
             removeFontFaceFromStyles();
 
@@ -67,7 +80,9 @@ public class HtmlProcessor {
             manageMenu();
 
             for (String selector: selectorsToRemove) {
-                removeElements(selector);
+                if (!(includeJs && selector.equals("script"))) {
+                    removeElements(selector);
+                }
             }
 
             for (String className: classesToRemove) {
@@ -89,6 +104,10 @@ public class HtmlProcessor {
             prepareToDownload("link[rel=stylesheet]", "href", CSS_FOLDER);
             prepareToDownload("img", "src", IMG_FOLDER);
             prepareToDownloadBackgroundImagesInStyle("*",  IMG_FOLDER);
+
+            if (includeJs) {
+                prepareToDownload("script", "src", JS_FOLDER);
+            }
 
             Elements hrefLinks = document.select("[href]");
             for (Element linkElement : hrefLinks) {
